@@ -1,0 +1,375 @@
+basePath: /
+definitions:
+  dto.AddOrderResponse:
+    properties:
+      orders:
+        type: string
+    type: object
+  dto.AuthRequest:
+    properties:
+      login:
+        type: string
+      password:
+        type: string
+    type: object
+  dto.AuthResponse:
+    properties:
+      access_token:
+        type: string
+      refresh_token:
+        type: string
+    type: object
+  dto.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  dto.GetAllOrdersResponse:
+    properties:
+      orders:
+        items:
+          $ref: '#/definitions/model.Order'
+        type: array
+    type: object
+  dto.GetAllWithdrawalsResponse:
+    properties:
+      withdrawals:
+        items:
+          $ref: '#/definitions/dto.Withdrawn'
+        type: array
+    type: object
+  dto.GetBalanceResponse:
+    properties:
+      current:
+        type: number
+      withdrawn:
+        type: number
+    type: object
+  dto.NewWithdrawnRequest:
+    properties:
+      order:
+        type: string
+      sum:
+        type: number
+    type: object
+  dto.RefreshResponse:
+    properties:
+      access_token:
+        type: string
+    type: object
+  dto.RegisterRequest:
+    properties:
+      login:
+        type: string
+      password:
+        type: string
+    type: object
+  dto.Withdrawn:
+    properties:
+      order:
+        type: string
+      processed_at:
+        type: string
+      sum:
+        type: number
+    type: object
+  model.Order:
+    properties:
+      accrual:
+        type: number
+      number:
+        type: string
+      status:
+        $ref: '#/definitions/model.OrderStatus'
+      uploadedAt:
+        type: string
+      userID:
+        type: string
+    type: object
+  model.OrderStatus:
+    enum:
+    - NEW
+    - PROCESSING
+    - INVALID
+    - PROCESSED
+    type: string
+    x-enum-varnames:
+    - OrderStatusNew
+    - OrderStatusProcessing
+    - OrderStatusInvalid
+    - OrderStatusProcessed
+host: localhost:8080
+info:
+  contact: {}
+  description: This is a sample server celler server.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: Loyaltyhub API
+  version: "1.0"
+paths:
+  /api/v1/auth:
+    post:
+      consumes:
+      - application/json
+      description: Аутентифицирует пользователя и возвращает access/refresh токены
+      parameters:
+      - description: Данные для входа
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AuthRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Аутентификация пользователя
+      tags:
+      - user
+  /api/v1/refresh:
+    get:
+      consumes:
+      - application/json
+      description: Обновляет access токен по refresh токену
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RefreshResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: Обновление access токена
+      tags:
+      - user
+  /api/v1/register:
+    post:
+      consumes:
+      - application/json
+      description: Регистрирует нового пользователя и возвращает access/refresh токены
+      parameters:
+      - description: Данные для регистрации
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Регистрация пользователя
+      tags:
+      - user
+  /api/v1/user/balance:
+    get:
+      description: Возвращает текущий баланс и сумму выведенных средств
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.GetBalanceResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Текущий баланс пользователя
+      tags:
+      - balance
+  /api/v1/user/balance/withdraw:
+    post:
+      consumes:
+      - application/json
+      description: Позволяет списать средства на заказ
+      parameters:
+      - description: Данные списания
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dto.NewWithdrawnRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: успешное списание
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "402":
+          description: Payment Required
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Списание средств с баланса
+      tags:
+      - balance
+  /api/v1/user/orders:
+    get:
+      consumes:
+      - application/json
+      description: Возвращает информацию по всем товарам пользователя
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.GetAllOrdersResponse'
+        "204":
+          description: No Content
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Возвращает информацию по всем товарам пользователя
+      tags:
+      - order
+    post:
+      consumes:
+      - text/plain
+      description: Загрудает в систему новый товар
+      parameters:
+      - description: Номер заказа
+        in: body
+        name: input
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.AddOrderResponse'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Загрузка заказа
+      tags:
+      - order
+  /api/v1/user/withdrawals:
+    get:
+      description: Получение всех транзакций списания пользователя
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.GetAllWithdrawalsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: История выводов средств
+      tags:
+      - balance
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

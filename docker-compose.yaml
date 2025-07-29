@@ -1,0 +1,65 @@
+services:
+  jaeger:
+      image: jaegertracing/jaeger:2.8.0
+      container_name: jaeger
+      ports:
+        - "5778:5778"     # admin
+        - "16686:16686"   # UI
+        - "4318:4318"     # OTLP HTTP
+      volumes:
+        - ./jaeger/config.yaml:/jaeger/config.yaml
+        - ./data:/data
+      command:
+        - "--config=/jaeger/config.yaml"
+      networks:
+        - loyalityhub_network
+  db:
+    image: postgres:17.5-alpine3.22
+    restart: always
+    container_name: "orders_db"
+    volumes:
+      - loyalityhub_orders_db:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_PASSWORD: ${ORDERS_DB_PASS}
+      POSTGRES_USER: ${ORDERS_DB_USER}
+      POSTGRES_DB: ${ORDERS_DB_NAME}
+      TZ: 'GMT-3'
+      PGTZ: 'GMT-3'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ORDERS_DB_USER} -d ${ORDERS_DB_NAME}"]
+      interval: 10s
+      retries: 5
+      start_period: 1s
+      timeout: 10s
+    networks:
+      - loyalityhub_network
+  migrator:
+    build:
+      context: .
+      dockerfile: migrator/Dockerfile
+    container_name: "migrator"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: >
+       sh -c "goose -dir /migrations postgres $ORDERS_DB_DSN up"
+    networks:
+        - loyalityhub_network
+  accrual-mock-service:
+    build:
+      context: ./mock/accrual
+    ports:
+      - "8090:8090"
+    networks:
+      - loyalityhub_network
+
+
+networks:
+  loyalityhub_network:
+
+volumes:
+  loyalityhub_orders_db:
