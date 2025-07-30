@@ -1,1 +1,6 @@
+#.env file
 .env
+
+# storage jaeger
+data/jaeger/*
+data/jaeger_archive/*
