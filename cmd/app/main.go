@@ -58,7 +58,7 @@ func main() {
 	metrics.RegisterMetrics()
 
 	// инициализируем трейсер
-	tp, err := tracing.StartTracing(os.Getenv("JAEGER_LISTEN_HOST_TEST") + ":" + os.Getenv("JAEGER_LISTEN_PORT"))
+	tp, err := tracing.StartTracing(os.Getenv("JAEGER_LISTEN_HOST") + ":" + os.Getenv("JAEGER_LISTEN_PORT"))
 	if err != nil {
 		logger.Fatal("can't init logger")
 		panic(err)
@@ -66,7 +66,7 @@ func main() {
 
 	// инициализируем репозиторий
 	repos := repository.NewRepositories(logger)
-	err = repos.Init(ctx, os.Getenv("ORDERS_DB_DSN_TEST"))
+	err = repos.Init(ctx, os.Getenv("ORDERS_DB_DSN"))
 	if err != nil {
 		logger.Fatal("can't init repo")
 		panic(err)
