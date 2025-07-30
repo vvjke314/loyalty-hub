@@ -1,8 +1,13 @@
 package router
 
 import (
+	"context"
+	"net"
+	"net/http"
+
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/vvjke314/itk-courses/loyalityhub/internal/handlers"
@@ -12,11 +17,11 @@ import (
 )
 
 type Router struct {
-	engine *gin.Engine
+	server *http.Server
 	logger *zap.Logger
 }
 
-func NewRouter(logger *zap.Logger, userHandler *handlers.UserHandler,
+func NewRouter(ctx context.Context, logger *zap.Logger, userHandler *handlers.UserHandler,
 	orderHandler *handlers.OrderHandler, balanceHandler *handlers.BalanceHandler) *Router {
 	// инициализация token manager
 	tm := tokenmanager.NewTokenManager(tokenmanager.NewTokenManagerConfig())
@@ -26,6 +31,7 @@ func NewRouter(logger *zap.Logger, userHandler *handlers.UserHandler,
 	// включаем gzip
 	r.Use(gzip.Gzip(gzip.DefaultCompression))
 	r.Use(middleware.LoggerMiddleware(logger))
+	r.Use(middleware.Metrics())
 	api := r.Group("/api/v1")
 
 	// Регистрация маршрутов для user
@@ -47,15 +53,26 @@ func NewRouter(logger *zap.Logger, userHandler *handlers.UserHandler,
 
 	// Swagger UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// init prometheus metrics
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	return &Router{
-		engine: r,
+		server: &http.Server{
+			Addr:        ":8080",
+			BaseContext: func(l net.Listener) context.Context { return ctx },
+			Handler:     r,
+		},
 		logger: logger,
 	}
 }
 
-func (r *Router) Run() {
+func (r *Router) Run() error {
 	// Запуск сервера
-	if err := r.engine.Run(); err != nil {
-		r.logger.Fatal("failed to run server", zap.Error(err))
-	}
+	return r.server.ListenAndServe()
+}
+
+// шатдаун сервера
+func (r *Router) Shutdown(ctx context.Context) error {
+	return r.server.Shutdown(ctx)
 }

@@ -4,18 +4,21 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	_ "github.com/vvjke314/itk-courses/loyalityhub/docs"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/joho/godotenv"
+	"github.com/vvjke314/itk-courses/loyalityhub/internal/app"
 	"github.com/vvjke314/itk-courses/loyalityhub/internal/client/accrual"
 	_ "github.com/vvjke314/itk-courses/loyalityhub/internal/dto"
-	"github.com/vvjke314/itk-courses/loyalityhub/internal/handlers"
 	"github.com/vvjke314/itk-courses/loyalityhub/internal/logx"
+	"github.com/vvjke314/itk-courses/loyalityhub/internal/metrics"
 	"github.com/vvjke314/itk-courses/loyalityhub/internal/repository"
-	"github.com/vvjke314/itk-courses/loyalityhub/internal/router"
 	"github.com/vvjke314/itk-courses/loyalityhub/internal/services"
 	"github.com/vvjke314/itk-courses/loyalityhub/internal/tracing"
 	accrualWorker "github.com/vvjke314/itk-courses/loyalityhub/internal/worker/accrual"
@@ -38,6 +41,11 @@ func main() {
 		log.Println("can't parse .env config")
 		panic(err)
 	}
+
+	// инициализируем контекст для gracefull-shuttdown'a
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// получаем логгер
 	logger, err := logx.Get(os.Getenv("LOG_FILE"))
 	if err != nil {
@@ -46,18 +54,15 @@ func main() {
 	}
 	logger.Debug("logger successfully configurated and started")
 
+	// инициализируем метрики
+	metrics.RegisterMetrics()
+
 	// инициализируем трейсер
 	tp, err := tracing.StartTracing(os.Getenv("JAEGER_LISTEN_HOST_TEST") + ":" + os.Getenv("JAEGER_LISTEN_PORT"))
 	if err != nil {
 		logger.Fatal("can't init logger")
 		panic(err)
 	}
-	defer func() {
-		_ = tp.Shutdown(context.Background())
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// инициализируем репозиторий
 	repos := repository.NewRepositories(logger)
@@ -69,41 +74,78 @@ func main() {
 	defer repos.Close()
 	logger.Debug("repository successfully configurated and started")
 
+	// группа ошибок
+	errGrp, errCtx := errgroup.WithContext(ctx)
+
+	// контекст для работы приложения
+	appCtx, cancelAppCtx := context.WithCancel(ctx)
+	defer cancelAppCtx()
+
 	// инициализация клиента
 	accrualClient := accrual.NewAccrualClient(100, os.Getenv("ACCRUAL_SERVICE"))
 
-	// инициализация сервисов
-	userService := services.NewUserService(logger, repos)
-	orderService := services.NewOrderService(repos, logger)
-	balanceService := services.NewBalanceService(repos, logger)
+	// инициализация сервиса worker'a
 	accrualWorkerService := services.NewAccrualWorkerService(repos, logger, accrualClient)
-
-	// инициализация хендлеров
-	userHandler := handlers.NewUserHandler(os.Getenv("APP_HOST"), userService)
-	orderHandler := handlers.NewOrderHandler(os.Getenv("APP_HOST"), orderService)
-	balanceHandler := handlers.NewBalanceHandler(os.Getenv("APP_HOST"), balanceService)
-
-	// настройка роутера
-	router := router.NewRouter(logger, userHandler, orderHandler, balanceHandler)
 
 	// настройка фонового воркера
 	worker := accrualWorker.NewAccrualWorker(1*time.Second, accrualWorkerService)
 	errChan := make(chan error)
 
-	go func() {
-		router.Run()
-	}()
+	// инициализация приложения
+	app := app.NewApp(logger)
+	app.Init(appCtx, repos)
 
-	go func() {
-		worker.Work(ctx, errChan)
-	}()
+	// запуск приложения
+	errGrp.Go(func() error {
+		if err := app.Run(); err != nil {
+			cancelAppCtx()
+			return err
+		}
+		return nil
+	})
 
-	go func() {
-		logger := logger.With(zap.String("service name", "accrual_worker"))
+	// запуск воркера
+	errGrp.Go(func() error {
+		defer close(errChan)
+		if err := worker.Work(ctx, errChan); err != nil {
+			cancelAppCtx()
+			return err
+		}
+		return nil
+	})
+
+	// запуск принта ошибок
+	errGrp.Go(func() error {
+		logger := logger.With(zap.String("service_name", "accrual_worker"))
 		for err := range errChan {
 			logger.Error("error while working", zap.Error(err))
 		}
-	}()
+		return nil
+	})
 
-	<-ctx.Done()
+	// shutdown ctx
+	shtDownCtx, cancelShtDown := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelShtDown()
+
+	// shutdown
+	errGrp.Go(func() error {
+		<-errCtx.Done()
+
+		if err := app.Shutdown(shtDownCtx); err != nil {
+			logger.Error("error while shutdowning", zap.Error(err))
+			return err
+		}
+
+		if err := tp.Shutdown(shtDownCtx); err != nil {
+			logger.Error("error while shutdowning", zap.Error(err))
+			return err
+		}
+
+		logger.Info("gracefully shutted down")
+		return nil
+	})
+
+	if err := errGrp.Wait(); err != nil {
+		return
+	}
 }

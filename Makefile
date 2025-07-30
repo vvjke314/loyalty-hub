@@ -7,5 +7,8 @@ container-rm:
 build:
 	docker compose build
 
-run:
+run-with-accrual:
 	docker compose up 
+
+run-without-acrrual:
+	docker comopose up db, migrator, jaeger, app

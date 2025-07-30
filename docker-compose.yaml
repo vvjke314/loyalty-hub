@@ -1,4 +1,21 @@
 services:
+  loyaltyhub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: loyaltyhub
+    depends_on:
+      db:  
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./app.log:/root/app.log
+    networks:
+      - loyalityhub_network
+    restart: unless-stopped
   jaeger:
       image: jaegertracing/jaeger:2.8.0
       container_name: jaeger
@@ -6,6 +23,16 @@ services:
         - "5778:5778"     # admin
         - "16686:16686"   # UI
         - "4318:4318"     # OTLP HTTP
+        - "13133:13133"   # healtcheck
+      healthcheck:
+        test: wget --no-verbose --tries=1 --spider http://localhost:13133/status || exit 1
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        start_period: 5s
+      environment:
+          JAEGER_LISTEN_HOST: jaeger
+          JAEGER_LISTEN_PORT: 4318
       volumes:
         - ./jaeger/config.yaml:/jaeger/config.yaml
         - ./data:/data
@@ -49,9 +76,32 @@ services:
        sh -c "goose -dir /migrations postgres $ORDERS_DB_DSN up"
     networks:
         - loyalityhub_network
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - loyalityhub_prometheus_data:/prometheus
+    networks:
+      - loyalityhub_network
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - loyality_hub_grafana_data:/var/lib/grafana
+    networks:
+      - loyalityhub_network
   accrual-mock-service:
-    build:
-      context: ./mock/accrual
+    image: vvjke314/loyalty-hub-accrual-service:v1.0.0
     ports:
       - "8090:8090"
     networks:
@@ -63,3 +113,5 @@ networks:
 
 volumes:
   loyalityhub_orders_db:
+  loyalityhub_prometheus_data:
+  loyality_hub_grafana_data:
