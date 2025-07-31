@@ -54,6 +54,13 @@ func main() {
 	}
 	logger.Debug("logger successfully configurated and started")
 
+	// рекаверим панику
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println(r)
+		}
+	}()
+
 	// инициализируем метрики
 	metrics.RegisterMetrics()
 
